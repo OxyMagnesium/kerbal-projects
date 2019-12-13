@@ -1,6 +1,7 @@
 import krpc
 import time
 import math
+from hoverslam_suicide import stoppingDist
 
 g = 9.8
 
@@ -17,40 +18,49 @@ def twr(vessel):
 def twrToThrottle(vessel, setting):
     vessel.control.throttle = (setting/twr(vessel))
 
-pause = input("Press enter to initiate landing.")
-del pause
+def printTelemetry(vessel):
+    buffer = '{0} m; {1} m/s; {2}%'.format(round(vessel.flight(srf).surface_altitude),
+                                           round(vessel.flight(srf).vertical_speed),
+                                           round(vessel.control.throttle, 1)*100)
+    print(buffer)
+
+input("Press enter to initiate landing.")
 
 print("Waiting for landing burn start.")
-burnStarted = False
+max_g = 4
 target_alt = 15
-while vessel.flight(srf).speed > 5:
-    alt = vessel.flight(vessel.orbit.body.reference_frame).surface_altitude
-    vel = vessel.flight(vessel.orbit.body.reference_frame).speed
-    dist = abs(target_alt - alt)
+while vessel.flight(srf).surface_altitude - 1.1*stoppingDist(vessel, max_g) > 0:
+    printTelemetry(vessel)
+    print(stoppingDist(vessel, max_g))
+
+print("Landing burn started.")
+while abs(vessel.flight(srf).vertical_speed) > 1:
+    alt = vessel.flight(srf).surface_altitude
+    vel = vessel.flight(srf).vertical_speed
+    dist = abs(target_alt - alt)*0.75 #/math.cos(math.radians(abs(90 - vessel.flight(srf).pitch)))
     req_acc = (vel*vel)/(2*dist)
     req_twr = 1 + (req_acc/g)
-    if burnStarted == False:
-        if req_twr < 4.0 and req_twr < twr(vessel):
-            continue
-        burnStarted = True
-        print("Landing burn started.")
-        print("Throttle setting:")
-    twrToThrottle(vessel, req_twr)
-    print(round(vessel.control.throttle*100, 1))
-    time.sleep(0.1)
+    printTelemetry(vessel)
+    if req_twr > max_g:
+        req_twr = max_g
+    try:
+        twrToThrottle(vessel, req_twr)
+    except ZeroDivisionError:
+        break
 
-vessel.auto_pilot.engage()
-vessel.auto_pilot.target_pitch = 90
-for leg in vessel.parts.legs:
-    if leg.is_grounded == True:
+#for leg in vessel.parts.legs:
+while True:
+    if abs(vessel.flight(srf).vertical_speed) < 1: #or leg.is_grounded == True:
+        for i in range(0, 100):
+            vessel.control.throttle -= 1
+            time.sleep(0.05)
         break
     else:
-        twrToThrottle(vessel, 1.05)
-    time.sleep(0.1)
+        try:
+            twrToThrottle(vessel, 1.0)
+        except ZeroDivisionError:
+            print('Out of propellant!')
+            break
 
 vessel.control.throttle = 0
-vessel.auto_pilot.disengage()
 print("Shutdown!")
-
-pause = input("Press enter to exit.")
-del pause
